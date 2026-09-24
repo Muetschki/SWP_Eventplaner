@@ -1,0 +1,64 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "anna",
+      "password": "anna",
+      "name": "Anna"
+    },
+    {
+      "id": 2,
+      "username": "max",
+      "password": "max",
+      "name": "Max"
+    }
+  ],
+  "events": [
+    {
+      "id": 1,
+      "title": "School picnic",
+      "date": "2026-10-05",
+      "place": "City park",
+      "description": "Meet at the big oak tree. Bring a blanket and something to share.",
+      "createdBy": 1,
+      "participants": [
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Movie night",
+      "date": "2026-10-12",
+      "place": "Room 12",
+      "description": "We watch a film and eat snacks.",
+      "createdBy": 2,
+      "participants": [
+        2
+      ]
+    },
+    {
+      "id": 3,
+      "title": "matura",
+      "date": "2027-05-12",
+      "place": "Htl anich",
+      "description": "",
+      "createdBy": 1,
+      "participants": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Class hike",
+      "date": "2026-11-02",
+      "place": "Nordkette",
+      "description": "Short walk after school.",
+      "createdBy": 1,
+      "participants": [
+        1,
+        2
+      ]
+    }
+  ]
+}
