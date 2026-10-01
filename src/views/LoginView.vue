@@ -54,6 +54,11 @@ async function login() {
 
       <button type="submit">Log in</button>
 
+      <p class="auth-switch">
+        No account yet?
+        <router-link to="/register">Create one</router-link>
+      </p>
+
       <div class="demo">
         <p>Two accounts, same events:</p>
         <p><strong>anna</strong> / anna</p>

@@ -124,6 +124,16 @@ label {
   margin: 0 0 4px;
 }
 
+.auth-switch {
+  margin: 16px 0 0;
+  color: var(--muted);
+}
+
+.auth-switch a {
+  color: var(--green-dark);
+  font-weight: 700;
+}
+
 .page {
   min-height: 100vh;
 }

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from './views/LoginView.vue'
+import RegisterView from './views/RegisterView.vue'
 import EventsView from './views/EventsView.vue'
 import EventEmptyView from './views/EventEmptyView.vue'
 import EventFormView from './views/EventFormView.vue'
@@ -11,6 +12,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/events' },
     { path: '/login', component: LoginView },
+    { path: '/register', component: RegisterView },
     {
       path: '/events',
       component: EventsView,
@@ -23,11 +25,15 @@ const router = createRouter({
   ],
 })
 
+const publicPaths = ['/login', '/register']
+
 router.beforeEach((to) => {
-  if (to.path !== '/login' && !currentUser.value) {
+  const isPublic = publicPaths.includes(to.path)
+
+  if (!isPublic && !currentUser.value) {
     return '/login'
   }
-  if (to.path === '/login' && currentUser.value) {
+  if (isPublic && currentUser.value) {
     return '/events'
   }
 })

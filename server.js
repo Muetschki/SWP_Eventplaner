@@ -50,6 +50,28 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, item)
   }
 
+  if (req.method === 'POST' && collection === 'users' && !id) {
+    const body = JSON.parse(await readBody(req))
+    const name = String(body.name || '').trim()
+    const username = String(body.username || '').trim()
+    const password = String(body.password || '')
+
+    if (!name || !username || !password) {
+      return send(res, 400, { error: 'Name, username and password are required.' })
+    }
+
+    const db = readDb()
+    if (db.users.some((user) => user.username === username)) {
+      return send(res, 409, { error: 'This username is already taken.' })
+    }
+
+    const nextId = db.users.reduce((max, user) => Math.max(max, user.id), 0) + 1
+    const user = { id: nextId, username, password, name }
+    db.users.push(user)
+    writeDb(db)
+    return send(res, 201, user)
+  }
+
   if (req.method === 'POST' && collection === 'events' && !id) {
     const body = JSON.parse(await readBody(req))
     const db = readDb()
