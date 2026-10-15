@@ -40,30 +40,44 @@ function hasJoined() {
   return event.value.participants.includes(currentUser.value.id)
 }
 
-async function joinEvent() {
-  if (hasJoined() || joining.value) return
+async function updateParticipation(participating) {
+  if (joining.value) return
 
   joining.value = true
   error.value = ''
+
+  const participants = participating
+    ? [...event.value.participants, currentUser.value.id]
+    : event.value.participants.filter((id) => id !== currentUser.value.id)
 
   try {
     const response = await fetch(`/api/events/${event.value.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        participants: [...event.value.participants, currentUser.value.id],
+        participants,
       }),
     })
 
-    if (!response.ok) throw new Error('Could not join')
+    if (!response.ok) throw new Error('Could not update participation')
 
     event.value = await response.json()
     await loadEvents()
   } catch {
-    error.value = 'Could not join this event.'
+    error.value = participating
+      ? 'Could not join this event.'
+      : 'Could not leave this event.'
   } finally {
     joining.value = false
   }
+}
+
+function joinEvent() {
+  return updateParticipation(true)
+}
+
+function leaveEvent() {
+  return updateParticipation(false)
 }
 </script>
 
@@ -82,6 +96,14 @@ async function joinEvent() {
     <p v-if="error" class="error">{{ error }}</p>
 
     <p v-if="hasJoined()" class="joined-note">You joined this event.</p>
+    <button
+      v-if="hasJoined()"
+      type="button"
+      :disabled="joining"
+      @click="leaveEvent"
+    >
+      {{ joining ? 'Leaving...' : 'Leave event' }}
+    </button>
     <button v-else type="button" :disabled="joining" @click="joinEvent">
       {{ joining ? 'Joining...' : 'Join event' }}
     </button>
