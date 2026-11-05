@@ -31,6 +31,7 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  try {
   const url = new URL(req.url, `http://localhost:${port}`)
   const parts = url.pathname.split('/').filter(Boolean)
   const collection = parts[0]
@@ -95,15 +96,57 @@ const server = http.createServer(async (req, res) => {
     const db = readDb()
     const index = db.events.findIndex((event) => String(event.id) === id)
     if (index === -1) return send(res, 404, { error: 'Not found' })
-    db.events[index] = {
-      ...db.events[index],
-      participants: body.participants,
+
+    const event = db.events[index]
+    const editingDetails = ['title', 'date', 'place', 'description'].some((key) => key in body)
+
+    if (editingDetails) {
+      if (Number(body.userId) !== event.createdBy) {
+        return send(res, 403, { error: 'Only the owner can edit this event.' })
+      }
+
+      const title = String(body.title || '').trim()
+      const date = String(body.date || '').trim()
+      const place = String(body.place || '').trim()
+
+      if (!title || !date || !place) {
+        return send(res, 400, { error: 'Title, date and place are required.' })
+      }
+
+      event.title = title
+      event.date = date
+      event.place = place
+      event.description = String(body.description || '').trim()
     }
+
+    if (Array.isArray(body.participants)) {
+      event.participants = body.participants
+    }
+
+    db.events[index] = event
     writeDb(db)
-    return send(res, 200, db.events[index])
+    return send(res, 200, event)
+  }
+
+  if (req.method === 'DELETE' && collection === 'events' && id) {
+    const body = JSON.parse(await readBody(req))
+    const db = readDb()
+    const index = db.events.findIndex((event) => String(event.id) === id)
+    if (index === -1) return send(res, 404, { error: 'Not found' })
+
+    if (Number(body.userId) !== db.events[index].createdBy) {
+      return send(res, 403, { error: 'Only the owner can delete this event.' })
+    }
+
+    const [removed] = db.events.splice(index, 1)
+    writeDb(db)
+    return send(res, 200, removed)
   }
 
   send(res, 404, { error: 'Not found' })
+  } catch {
+    send(res, 400, { error: 'Invalid request.' })
+  }
 })
 
 server.listen(port, () => {

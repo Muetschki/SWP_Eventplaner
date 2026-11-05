@@ -1,11 +1,26 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, logout } from '../auth.js'
 import { events, formatDate, loadEvents } from '../data.js'
 
 const router = useRouter()
 const loadError = ref('')
+const query = ref('')
+
+const visibleEvents = computed(() => {
+  const term = query.value.trim().toLowerCase()
+
+  return [...events.value]
+    .filter((event) => {
+      if (!term) return true
+      return (
+        event.title.toLowerCase().includes(term) ||
+        event.place.toLowerCase().includes(term)
+      )
+    })
+    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
+})
 
 onMounted(async () => {
   try {
@@ -42,11 +57,22 @@ function hasJoined(event) {
           <router-link class="button" to="/events/new">Add event</router-link>
         </div>
 
+        <div class="field">
+          <label for="event-search">Search</label>
+          <input
+            id="event-search"
+            v-model="query"
+            type="search"
+            placeholder="Title or place"
+          />
+        </div>
+
         <p v-if="loadError" class="error">{{ loadError }}</p>
         <p v-else-if="events.length === 0" class="muted">No events yet. Add the first one.</p>
+        <p v-else-if="visibleEvents.length === 0" class="muted">No events match your search.</p>
 
         <ul class="event-list">
-          <li v-for="event in events" :key="event.id">
+          <li v-for="event in visibleEvents" :key="event.id">
             <router-link :to="'/events/' + event.id" class="event-link">
               <span class="event-title">{{ event.title }}</span>
               <span class="event-meta">
