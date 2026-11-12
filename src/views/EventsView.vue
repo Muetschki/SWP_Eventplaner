@@ -36,7 +36,7 @@ function logOut() {
 }
 
 function hasJoined(event) {
-  return event.participants.includes(currentUser.value.id)
+  return Array.isArray(event.participants) && event.participants.includes(currentUser.value.id)
 }
 </script>
 
@@ -78,8 +78,12 @@ function hasJoined(event) {
               <span class="event-meta">
                 {{ formatDate(event.date) }} · {{ event.place }}
               </span>
-              <span class="event-meta">{{ event.participants.length }} joined</span>
-              <span v-if="hasJoined(event)" class="badge">Joined</span>
+              <span v-if="event.locked" class="badge">Private</span>
+              <template v-else>
+                <span class="event-meta">{{ event.participants.length }} joined</span>
+                <span v-if="event.visibility === 'private'" class="badge">Private</span>
+                <span v-if="hasJoined(event)" class="badge">Joined</span>
+              </template>
             </router-link>
           </li>
         </ul>

@@ -17,6 +17,8 @@ const title = ref('')
 const date = ref('')
 const place = ref('')
 const description = ref('')
+const unlockPassword = ref('')
+const unlocking = ref(false)
 let requestId = 0
 
 function isOwner() {
@@ -28,9 +30,13 @@ async function loadEvent() {
   error.value = ''
   editing.value = false
   confirmingDelete.value = false
+  unlockPassword.value = ''
 
   try {
-    const response = await fetch(`/api/events/${route.params.id}`)
+    const userId = currentUser.value?.id ?? ''
+    const response = await fetch(
+      `/api/events/${route.params.id}?userId=${encodeURIComponent(userId)}`,
+    )
     if (myRequest !== requestId) return
 
     if (!response.ok) {
@@ -52,7 +58,10 @@ async function loadEvent() {
 watch(() => route.params.id, loadEvent, { immediate: true })
 
 function hasJoined() {
-  return event.value.participants.includes(currentUser.value.id)
+  return (
+    Array.isArray(event.value.participants) &&
+    event.value.participants.includes(currentUser.value.id)
+  )
 }
 
 async function updateParticipation(participating) {
@@ -71,8 +80,15 @@ async function updateParticipation(participating) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         participants,
+        userId: currentUser.value.id,
+        password: unlockPassword.value,
       }),
     })
+
+    if (response.status === 403) {
+      error.value = 'Wrong password.'
+      return
+    }
 
     if (!response.ok) throw new Error('Could not update participation')
 
@@ -93,6 +109,43 @@ function joinEvent() {
 
 function leaveEvent() {
   return updateParticipation(false)
+}
+
+async function unlockEvent() {
+  if (unlocking.value) return
+
+  error.value = ''
+
+  if (!unlockPassword.value) {
+    error.value = 'Please enter the event password.'
+    return
+  }
+
+  unlocking.value = true
+
+  try {
+    const response = await fetch(`/api/events/${event.value.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: unlockPassword.value,
+        userId: currentUser.value.id,
+      }),
+    })
+
+    if (response.status === 403) {
+      error.value = 'Wrong password.'
+      return
+    }
+
+    if (!response.ok) throw new Error('Could not open event')
+
+    event.value = await response.json()
+  } catch {
+    error.value = 'Could not open this event.'
+  } finally {
+    unlocking.value = false
+  }
 }
 
 function startEdit() {
@@ -182,7 +235,29 @@ async function deleteEvent() {
 </script>
 
 <template>
-  <form v-if="event && editing" class="detail-card" @submit.prevent="saveEdit">
+  <form v-if="event && event.locked" class="detail-card" @submit.prevent="unlockEvent">
+    <h2>{{ event.title }}</h2>
+    <p class="event-meta">{{ formatDate(event.date) }} · {{ event.place }}</p>
+    <p class="muted">This event is private. Enter the password to see it and join.</p>
+
+    <div class="field">
+      <label for="unlock-password">Password</label>
+      <input
+        id="unlock-password"
+        v-model="unlockPassword"
+        type="password"
+        autocomplete="current-password"
+      />
+    </div>
+
+    <p v-if="error" class="error">{{ error }}</p>
+
+    <button type="submit" :disabled="unlocking">
+      {{ unlocking ? 'Checking...' : 'Open event' }}
+    </button>
+  </form>
+
+  <form v-else-if="event && editing" class="detail-card" @submit.prevent="saveEdit">
     <h2>Edit event</h2>
     <p class="muted">Only you can change this event, because you created it.</p>
 
@@ -222,7 +297,10 @@ async function deleteEvent() {
     <h2>{{ event.title }}</h2>
     <p class="event-meta">{{ formatDate(event.date) }} · {{ event.place }}</p>
     <p v-if="event.description">{{ event.description }}</p>
-    <p class="muted">Added by {{ nameFor(event.createdBy) }}</p>
+    <p class="muted">
+      Added by {{ nameFor(event.createdBy) }}
+      <template v-if="event.visibility === 'private'"> · Private</template>
+    </p>
 
     <h3>Who joined</h3>
     <ul class="people">

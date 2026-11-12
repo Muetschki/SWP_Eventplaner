@@ -30,6 +30,36 @@ function readBody(req) {
   })
 }
 
+function isPrivate(event) {
+  return event.visibility === 'private'
+}
+
+function canSeeEvent(event, userId) {
+  if (!isPrivate(event)) return true
+  const id = Number(userId)
+  if (!id) return false
+  return id === Number(event.createdBy) || event.participants.includes(id)
+}
+
+function toClient(event, userId, unlocked = false) {
+  const visibility = isPrivate(event) ? 'private' : 'public'
+
+  if (!unlocked && !canSeeEvent(event, userId)) {
+    return {
+      id: event.id,
+      title: event.title,
+      date: event.date,
+      place: event.place,
+      createdBy: event.createdBy,
+      visibility,
+      locked: true,
+    }
+  }
+
+  const { password, ...rest } = event
+  return { ...rest, visibility, locked: false }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
   const url = new URL(req.url, `http://localhost:${port}`)
@@ -42,12 +72,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && !id) {
-    return send(res, 200, readDb()[collection])
+    const items = readDb()[collection]
+    if (collection === 'events') {
+      const userId = url.searchParams.get('userId')
+      return send(res, 200, items.map((event) => toClient(event, userId)))
+    }
+    return send(res, 200, items)
   }
 
   if (req.method === 'GET' && id) {
     const item = readDb()[collection].find((entry) => String(entry.id) === id)
     if (!item) return send(res, 404, { error: 'Not found' })
+    if (collection === 'events') {
+      return send(res, 200, toClient(item, url.searchParams.get('userId')))
+    }
     return send(res, 200, item)
   }
 
@@ -75,6 +113,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && collection === 'events' && !id) {
     const body = JSON.parse(await readBody(req))
+    const visibility = body.visibility === 'private' ? 'private' : 'public'
+    const password = String(body.password || '')
+
+    if (visibility === 'private' && !password) {
+      return send(res, 400, { error: 'A private event needs a password.' })
+    }
+
     const db = readDb()
     const nextId = db.events.reduce((max, event) => Math.max(max, event.id), 0) + 1
     const event = {
@@ -85,10 +130,24 @@ const server = http.createServer(async (req, res) => {
       description: body.description || '',
       createdBy: body.createdBy,
       participants: body.participants || [],
+      visibility,
+      password: visibility === 'private' ? password : '',
     }
     db.events.push(event)
     writeDb(db)
-    return send(res, 201, event)
+    return send(res, 201, toClient(event, body.createdBy))
+  }
+
+  if (req.method === 'POST' && collection === 'events' && id) {
+    const body = JSON.parse(await readBody(req))
+    const event = readDb().events.find((entry) => String(entry.id) === id)
+    if (!event) return send(res, 404, { error: 'Not found' })
+
+    if (isPrivate(event) && String(body.password || '') !== String(event.password || '')) {
+      return send(res, 403, { error: 'Wrong password.' })
+    }
+
+    return send(res, 200, toClient(event, body.userId, true))
   }
 
   if (req.method === 'PATCH' && collection === 'events' && id) {
@@ -120,12 +179,25 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (Array.isArray(body.participants)) {
+      if (isPrivate(event)) {
+        const userId = Number(body.userId)
+        const knowsPassword = String(body.password || '') === String(event.password || '')
+        const allowed =
+          userId === Number(event.createdBy) ||
+          event.participants.includes(userId) ||
+          knowsPassword
+
+        if (!allowed) {
+          return send(res, 403, { error: 'Wrong password.' })
+        }
+      }
+
       event.participants = body.participants
     }
 
     db.events[index] = event
     writeDb(db)
-    return send(res, 200, event)
+    return send(res, 200, toClient(event, body.userId, true))
   }
 
   if (req.method === 'DELETE' && collection === 'events' && id) {
@@ -138,9 +210,9 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: 'Only the owner can delete this event.' })
     }
 
-    const [removed] = db.events.splice(index, 1)
+    db.events.splice(index, 1)
     writeDb(db)
-    return send(res, 200, removed)
+    return send(res, 200, { ok: true })
   }
 
   send(res, 404, { error: 'Not found' })

@@ -288,6 +288,35 @@ label {
   margin-bottom: 12px;
 }
 
+.choices {
+  border: 0;
+  padding: 0;
+  margin: 0 0 14px;
+}
+
+.choices legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.choice input {
+  width: auto;
+}
+
 @media (max-width: 800px) {
   .master-detail {
     grid-template-columns: 1fr;

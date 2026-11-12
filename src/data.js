@@ -1,10 +1,12 @@
 import { ref } from 'vue'
+import { currentUser } from './auth.js'
 
 export const events = ref([])
 export const users = ref([])
 
 export async function loadEvents() {
-  const response = await fetch('/api/events')
+  const userId = currentUser.value?.id ?? ''
+  const response = await fetch(`/api/events?userId=${encodeURIComponent(userId)}`)
   if (!response.ok) throw new Error('Could not load events')
   events.value = await response.json()
 }
