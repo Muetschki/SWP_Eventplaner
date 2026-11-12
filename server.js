@@ -2,16 +2,167 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 
 const port = 3000
-const dbPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'db.json')
+const dir = path.dirname(fileURLToPath(import.meta.url))
+const jsonPath = path.join(dir, 'db.json')
+const db = new DatabaseSync(path.join(dir, 'events.db'))
 
-function readDb() {
-  return JSON.parse(fs.readFileSync(dbPath, 'utf8'))
+const defaultCategories = ['Party', 'Sports', 'School', 'Culture', 'Gaming', 'Other']
+
+db.exec(`
+  PRAGMA foreign_keys = ON;
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+  );
+
+  CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    date TEXT NOT NULL,
+    place TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    category_id INTEGER REFERENCES categories(id),
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    visibility TEXT NOT NULL DEFAULT 'public',
+    password TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS event_participants (
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (event_id, user_id)
+  );
+`)
+
+const insertCategory = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)')
+for (const name of defaultCategories) insertCategory.run(name)
+
+function categoryIdByName(name) {
+  return db.prepare('SELECT id FROM categories WHERE name = ?').get(name)?.id ?? null
 }
 
-function writeDb(db) {
-  fs.writeFileSync(dbPath, JSON.stringify(db, null, 2))
+function importJson() {
+  const hasUsers = db.prepare('SELECT COUNT(*) AS count FROM users').get().count > 0
+  if (hasUsers || !fs.existsSync(jsonPath)) return
+
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
+  const otherId = categoryIdByName('Other')
+  const insertUser = db.prepare(
+    'INSERT INTO users (id, username, password, name) VALUES (?, ?, ?, ?)',
+  )
+  const insertEvent = db.prepare(`
+    INSERT INTO events (id, title, date, place, description, category_id, created_by, visibility, password)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const insertParticipant = db.prepare(
+    'INSERT OR IGNORE INTO event_participants (event_id, user_id) VALUES (?, ?)',
+  )
+
+  db.exec('BEGIN')
+  try {
+    for (const user of data.users || []) {
+      insertUser.run(user.id, user.username, user.password, user.name)
+    }
+    for (const event of data.events || []) {
+      insertEvent.run(
+        event.id,
+        event.title,
+        event.date,
+        event.place,
+        event.description || '',
+        otherId,
+        event.createdBy,
+        event.visibility === 'private' ? 'private' : 'public',
+        event.password || '',
+      )
+      for (const userId of event.participants || []) insertParticipant.run(event.id, userId)
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+importJson()
+
+const eventSelect = `
+  SELECT e.*, c.name AS category_name
+  FROM events e
+  LEFT JOIN categories c ON c.id = e.category_id
+`
+
+function participantsFor(eventId) {
+  return db
+    .prepare('SELECT user_id FROM event_participants WHERE event_id = ? ORDER BY rowid')
+    .all(eventId)
+    .map((row) => row.user_id)
+}
+
+function rowToEvent(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    date: row.date,
+    place: row.place,
+    description: row.description,
+    categoryId: row.category_id,
+    category: row.category_name,
+    createdBy: row.created_by,
+    participants: participantsFor(row.id),
+    visibility: row.visibility,
+    password: row.password,
+  }
+}
+
+function getEvent(id) {
+  const row = db.prepare(`${eventSelect} WHERE e.id = ?`).get(Number(id))
+  return row ? rowToEvent(row) : null
+}
+
+function findEvents({ categoryId, q }) {
+  const where = []
+  const params = []
+
+  if (categoryId) {
+    where.push('e.category_id = ?')
+    params.push(Number(categoryId))
+  }
+
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`
+    where.push(
+      "(e.title LIKE ? ESCAPE '\\' OR e.place LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')",
+    )
+    params.push(like, like, like)
+  }
+
+  const sql = `${eventSelect} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY e.date, e.title`
+  return db.prepare(sql).all(...params).map(rowToEvent)
+}
+
+function categoryExists(id) {
+  return Boolean(db.prepare('SELECT id FROM categories WHERE id = ?').get(Number(id)))
+}
+
+function setParticipants(eventId, participants) {
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO event_participants (event_id, user_id) VALUES (?, ?)',
+  )
+  db.prepare('DELETE FROM event_participants WHERE event_id = ?').run(eventId)
+  for (const userId of participants) insert.run(eventId, Number(userId))
 }
 
 function send(res, status, data) {
@@ -50,6 +201,8 @@ function toClient(event, userId, unlocked = false) {
       title: event.title,
       date: event.date,
       place: event.place,
+      categoryId: event.categoryId,
+      category: event.category,
       createdBy: event.createdBy,
       visibility,
       locked: true,
@@ -67,26 +220,37 @@ const server = http.createServer(async (req, res) => {
   const collection = parts[0]
   const id = parts[1]
 
-  if (!['users', 'events'].includes(collection) || parts.length > 2) {
+  if (!['users', 'events', 'categories'].includes(collection) || parts.length > 2) {
     return send(res, 404, { error: 'Not found' })
   }
 
-  if (req.method === 'GET' && !id) {
-    const items = readDb()[collection]
-    if (collection === 'events') {
-      const userId = url.searchParams.get('userId')
-      return send(res, 200, items.map((event) => toClient(event, userId)))
-    }
-    return send(res, 200, items)
+  if (req.method === 'GET' && collection === 'categories' && !id) {
+    return send(res, 200, db.prepare('SELECT id, name FROM categories ORDER BY name').all())
   }
 
-  if (req.method === 'GET' && id) {
-    const item = readDb()[collection].find((entry) => String(entry.id) === id)
-    if (!item) return send(res, 404, { error: 'Not found' })
-    if (collection === 'events') {
-      return send(res, 200, toClient(item, url.searchParams.get('userId')))
-    }
-    return send(res, 200, item)
+  if (req.method === 'GET' && collection === 'users' && !id) {
+    return send(res, 200, db.prepare('SELECT id, username, password, name FROM users').all())
+  }
+
+  if (req.method === 'GET' && collection === 'users' && id) {
+    const user = db.prepare('SELECT id, username, password, name FROM users WHERE id = ?').get(Number(id))
+    if (!user) return send(res, 404, { error: 'Not found' })
+    return send(res, 200, user)
+  }
+
+  if (req.method === 'GET' && collection === 'events' && !id) {
+    const userId = url.searchParams.get('userId')
+    const items = findEvents({
+      categoryId: url.searchParams.get('categoryId'),
+      q: String(url.searchParams.get('q') || '').trim(),
+    })
+    return send(res, 200, items.map((event) => toClient(event, userId)))
+  }
+
+  if (req.method === 'GET' && collection === 'events' && id) {
+    const event = getEvent(id)
+    if (!event) return send(res, 404, { error: 'Not found' })
+    return send(res, 200, toClient(event, url.searchParams.get('userId')))
   }
 
   if (req.method === 'POST' && collection === 'users' && !id) {
@@ -99,16 +263,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, 400, { error: 'Name, username and password are required.' })
     }
 
-    const db = readDb()
-    if (db.users.some((user) => user.username === username)) {
+    if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
       return send(res, 409, { error: 'This username is already taken.' })
     }
 
-    const nextId = db.users.reduce((max, user) => Math.max(max, user.id), 0) + 1
-    const user = { id: nextId, username, password, name }
-    db.users.push(user)
-    writeDb(db)
-    return send(res, 201, user)
+    const result = db
+      .prepare('INSERT INTO users (username, password, name) VALUES (?, ?, ?)')
+      .run(username, password, name)
+    return send(res, 201, { id: Number(result.lastInsertRowid), username, password, name })
   }
 
   if (req.method === 'POST' && collection === 'events' && !id) {
@@ -120,27 +282,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 400, { error: 'A private event needs a password.' })
     }
 
-    const db = readDb()
-    const nextId = db.events.reduce((max, event) => Math.max(max, event.id), 0) + 1
-    const event = {
-      id: nextId,
-      title: body.title,
-      date: body.date,
-      place: body.place,
-      description: body.description || '',
-      createdBy: body.createdBy,
-      participants: body.participants || [],
-      visibility,
-      password: visibility === 'private' ? password : '',
+    if (!categoryExists(body.categoryId)) {
+      return send(res, 400, { error: 'Please choose a valid category.' })
     }
-    db.events.push(event)
-    writeDb(db)
-    return send(res, 201, toClient(event, body.createdBy))
+
+    const result = db
+      .prepare(`
+        INSERT INTO events (title, date, place, description, category_id, created_by, visibility, password)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        body.title,
+        body.date,
+        body.place,
+        body.description || '',
+        Number(body.categoryId),
+        Number(body.createdBy),
+        visibility,
+        visibility === 'private' ? password : '',
+      )
+    const eventId = Number(result.lastInsertRowid)
+    setParticipants(eventId, body.participants || [])
+    return send(res, 201, toClient(getEvent(eventId), body.createdBy))
   }
 
   if (req.method === 'POST' && collection === 'events' && id) {
     const body = JSON.parse(await readBody(req))
-    const event = readDb().events.find((entry) => String(entry.id) === id)
+    const event = getEvent(id)
     if (!event) return send(res, 404, { error: 'Not found' })
 
     if (isPrivate(event) && String(body.password || '') !== String(event.password || '')) {
@@ -152,12 +320,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'PATCH' && collection === 'events' && id) {
     const body = JSON.parse(await readBody(req))
-    const db = readDb()
-    const index = db.events.findIndex((event) => String(event.id) === id)
-    if (index === -1) return send(res, 404, { error: 'Not found' })
+    const event = getEvent(id)
+    if (!event) return send(res, 404, { error: 'Not found' })
 
-    const event = db.events[index]
-    const editingDetails = ['title', 'date', 'place', 'description'].some((key) => key in body)
+    const editingDetails = ['title', 'date', 'place', 'description', 'categoryId'].some(
+      (key) => key in body,
+    )
 
     if (editingDetails) {
       if (Number(body.userId) !== event.createdBy) {
@@ -172,10 +340,21 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'Title, date and place are required.' })
       }
 
-      event.title = title
-      event.date = date
-      event.place = place
-      event.description = String(body.description || '').trim()
+      if (!categoryExists(body.categoryId)) {
+        return send(res, 400, { error: 'Please choose a valid category.' })
+      }
+
+      db.prepare(`
+        UPDATE events SET title = ?, date = ?, place = ?, description = ?, category_id = ?
+        WHERE id = ?
+      `).run(
+        title,
+        date,
+        place,
+        String(body.description || '').trim(),
+        Number(body.categoryId),
+        event.id,
+      )
     }
 
     if (Array.isArray(body.participants)) {
@@ -192,26 +371,22 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      event.participants = body.participants
+      setParticipants(event.id, body.participants)
     }
 
-    db.events[index] = event
-    writeDb(db)
-    return send(res, 200, toClient(event, body.userId, true))
+    return send(res, 200, toClient(getEvent(event.id), body.userId, true))
   }
 
   if (req.method === 'DELETE' && collection === 'events' && id) {
     const body = JSON.parse(await readBody(req))
-    const db = readDb()
-    const index = db.events.findIndex((event) => String(event.id) === id)
-    if (index === -1) return send(res, 404, { error: 'Not found' })
+    const event = getEvent(id)
+    if (!event) return send(res, 404, { error: 'Not found' })
 
-    if (Number(body.userId) !== db.events[index].createdBy) {
+    if (Number(body.userId) !== event.createdBy) {
       return send(res, 403, { error: 'Only the owner can delete this event.' })
     }
 
-    db.events.splice(index, 1)
-    writeDb(db)
+    db.prepare('DELETE FROM events WHERE id = ?').run(event.id)
     return send(res, 200, { ok: true })
   }
 

@@ -3,12 +3,24 @@ import { currentUser } from './auth.js'
 
 export const events = ref([])
 export const users = ref([])
+export const categories = ref([])
+export const filters = ref({ q: '', categoryId: '' })
 
 export async function loadEvents() {
-  const userId = currentUser.value?.id ?? ''
-  const response = await fetch(`/api/events?userId=${encodeURIComponent(userId)}`)
+  const params = new URLSearchParams({
+    userId: currentUser.value?.id ?? '',
+    q: filters.value.q.trim(),
+    categoryId: filters.value.categoryId,
+  })
+  const response = await fetch(`/api/events?${params}`)
   if (!response.ok) throw new Error('Could not load events')
   events.value = await response.json()
+}
+
+export async function loadCategories() {
+  const response = await fetch('/api/categories')
+  if (!response.ok) throw new Error('Could not load categories')
+  categories.value = await response.json()
 }
 
 export async function loadUsers() {

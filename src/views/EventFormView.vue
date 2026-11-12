@@ -1,25 +1,39 @@
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser } from '../auth.js'
-import { loadEvents } from '../data.js'
+import { categories, loadCategories, loadEvents } from '../data.js'
 
 const router = useRouter()
 const title = ref('')
 const date = ref('')
 const place = ref('')
 const description = ref('')
+const categoryId = ref('')
 const visibility = ref('public')
 const password = ref('')
 const error = ref('')
 const saving = ref(false)
+
+onMounted(async () => {
+  try {
+    await loadCategories()
+  } catch {
+    error.value = 'Could not load categories.'
+  }
+})
 
 async function saveEvent() {
   error.value = ''
 
   if (!title.value.trim() || !date.value || !place.value.trim()) {
     error.value = 'Please fill in title, date and place.'
+    return
+  }
+
+  if (!categoryId.value) {
+    error.value = 'Please choose a category.'
     return
   }
 
@@ -39,6 +53,7 @@ async function saveEvent() {
         date: date.value,
         place: place.value.trim(),
         description: description.value.trim(),
+        categoryId: Number(categoryId.value),
         createdBy: currentUser.value.id,
         participants: [currentUser.value.id],
         visibility: visibility.value,
@@ -82,6 +97,16 @@ async function saveEvent() {
     <div class="field">
       <label for="place">Place</label>
       <input id="place" v-model="place" />
+    </div>
+
+    <div class="field">
+      <label for="category">Category</label>
+      <select id="category" v-model="categoryId">
+        <option value="" disabled>Choose a category</option>
+        <option v-for="category in categories" :key="category.id" :value="category.id">
+          {{ category.name }}
+        </option>
+      </select>
     </div>
 
     <div class="field">

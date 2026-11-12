@@ -2,7 +2,14 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { currentUser } from '../auth.js'
-import { formatDate, loadEvents, loadUsers, nameFor } from '../data.js'
+import {
+  categories,
+  formatDate,
+  loadCategories,
+  loadEvents,
+  loadUsers,
+  nameFor,
+} from '../data.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +24,7 @@ const title = ref('')
 const date = ref('')
 const place = ref('')
 const description = ref('')
+const categoryId = ref('')
 const unlockPassword = ref('')
 const unlocking = ref(false)
 let requestId = 0
@@ -148,14 +156,21 @@ async function unlockEvent() {
   }
 }
 
-function startEdit() {
+async function startEdit() {
   confirmingDelete.value = false
   error.value = ''
   title.value = event.value.title
   date.value = event.value.date
   place.value = event.value.place
   description.value = event.value.description || ''
+  categoryId.value = event.value.categoryId ?? ''
   editing.value = true
+
+  try {
+    await loadCategories()
+  } catch {
+    error.value = 'Could not load categories.'
+  }
 }
 
 function cancelEdit() {
@@ -171,6 +186,11 @@ async function saveEdit() {
     return
   }
 
+  if (!categoryId.value) {
+    error.value = 'Please choose a category.'
+    return
+  }
+
   saving.value = true
 
   try {
@@ -183,6 +203,7 @@ async function saveEdit() {
         date: date.value,
         place: place.value.trim(),
         description: description.value.trim(),
+        categoryId: Number(categoryId.value),
       }),
     })
 
@@ -277,6 +298,16 @@ async function deleteEvent() {
     </div>
 
     <div class="field">
+      <label for="edit-category">Category</label>
+      <select id="edit-category" v-model="categoryId">
+        <option value="" disabled>Choose a category</option>
+        <option v-for="category in categories" :key="category.id" :value="category.id">
+          {{ category.name }}
+        </option>
+      </select>
+    </div>
+
+    <div class="field">
       <label for="edit-description">Description</label>
       <textarea id="edit-description" v-model="description" rows="4"></textarea>
     </div>
@@ -296,6 +327,7 @@ async function deleteEvent() {
   <article v-else-if="event" class="detail-card">
     <h2>{{ event.title }}</h2>
     <p class="event-meta">{{ formatDate(event.date) }} · {{ event.place }}</p>
+    <p v-if="event.category"><span class="badge">{{ event.category }}</span></p>
     <p v-if="event.description">{{ event.description }}</p>
     <p class="muted">
       Added by {{ nameFor(event.createdBy) }}

@@ -1,32 +1,40 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, logout } from '../auth.js'
-import { events, formatDate, loadEvents } from '../data.js'
+import { categories, events, filters, formatDate, loadCategories, loadEvents } from '../data.js'
 
 const router = useRouter()
 const loadError = ref('')
-const query = ref('')
+let searchTimer = null
 
-const visibleEvents = computed(() => {
-  const term = query.value.trim().toLowerCase()
+const isFiltering = computed(() => Boolean(filters.value.q.trim() || filters.value.categoryId))
 
-  return [...events.value]
-    .filter((event) => {
-      if (!term) return true
-      return (
-        event.title.toLowerCase().includes(term) ||
-        event.place.toLowerCase().includes(term)
-      )
-    })
-    .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
-})
-
-onMounted(async () => {
+async function refresh() {
   try {
     await loadEvents()
+    loadError.value = ''
   } catch {
     loadError.value = 'Could not load events. Start the app with npm start.'
+  }
+}
+
+watch(
+  () => filters.value.q,
+  () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(refresh, 250)
+  },
+)
+
+watch(() => filters.value.categoryId, refresh)
+
+onMounted(async () => {
+  await refresh()
+  try {
+    await loadCategories()
+  } catch {
+    loadError.value = 'Could not load categories.'
   }
 })
 
@@ -61,23 +69,36 @@ function hasJoined(event) {
           <label for="event-search">Search</label>
           <input
             id="event-search"
-            v-model="query"
+            v-model="filters.q"
             type="search"
-            placeholder="Title or place"
+            placeholder="Title, place or category"
           />
         </div>
 
+        <div class="field">
+          <label for="category-filter">Category</label>
+          <select id="category-filter" v-model="filters.categoryId">
+            <option value="">All categories</option>
+            <option v-for="category in categories" :key="category.id" :value="String(category.id)">
+              {{ category.name }}
+            </option>
+          </select>
+        </div>
+
         <p v-if="loadError" class="error">{{ loadError }}</p>
+        <p v-else-if="events.length === 0 && isFiltering" class="muted">
+          No events match your search.
+        </p>
         <p v-else-if="events.length === 0" class="muted">No events yet. Add the first one.</p>
-        <p v-else-if="visibleEvents.length === 0" class="muted">No events match your search.</p>
 
         <ul class="event-list">
-          <li v-for="event in visibleEvents" :key="event.id">
+          <li v-for="event in events" :key="event.id">
             <router-link :to="'/events/' + event.id" class="event-link">
               <span class="event-title">{{ event.title }}</span>
               <span class="event-meta">
                 {{ formatDate(event.date) }} · {{ event.place }}
               </span>
+              <span v-if="event.category" class="badge">{{ event.category }}</span>
               <span v-if="event.locked" class="badge">Private</span>
               <template v-else>
                 <span class="event-meta">{{ event.participants.length }} joined</span>
