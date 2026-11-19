@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getUsers } from '../api.js'
 import { setUser } from '../auth.js'
 
 const router = useRouter()
@@ -12,9 +13,7 @@ async function login() {
   error.value = ''
 
   try {
-    const response = await fetch('/api/users')
-    if (!response.ok) throw new Error('Could not load users')
-    const users = await response.json()
+    const users = await getUsers()
 
     const user = users.find(
       (item) => item.username === username.value.trim() && item.password === password.value,
@@ -28,7 +27,7 @@ async function login() {
     setUser(user)
     router.push('/events')
   } catch {
-    error.value = 'Could not reach the server. Start the app with npm start.'
+    error.value = 'Could not reach the database. Check your Firebase config in .env.local.'
   }
 }
 </script>

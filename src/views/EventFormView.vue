@@ -2,6 +2,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { createEvent } from '../api.js'
 import { currentUser } from '../auth.js'
 import { categories, loadCategories, loadEvents } from '../data.js'
 
@@ -45,25 +46,17 @@ async function saveEvent() {
   saving.value = true
 
   try {
-    const response = await fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: title.value.trim(),
-        date: date.value,
-        place: place.value.trim(),
-        description: description.value.trim(),
-        categoryId: Number(categoryId.value),
-        createdBy: currentUser.value.id,
-        participants: [currentUser.value.id],
-        visibility: visibility.value,
-        password: visibility.value === 'private' ? password.value : '',
-      }),
+    const created = await createEvent({
+      title: title.value.trim(),
+      date: date.value,
+      place: place.value.trim(),
+      description: description.value.trim(),
+      categoryId: categoryId.value,
+      createdBy: currentUser.value.id,
+      participants: [currentUser.value.id],
+      visibility: visibility.value,
+      password: visibility.value === 'private' ? password.value : '',
     })
-
-    if (!response.ok) throw new Error('Could not save event')
-
-    const created = await response.json()
     await loadEvents()
     router.push(`/events/${created.id}`)
   } catch {

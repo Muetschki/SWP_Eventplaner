@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { createUser } from '../api.js'
 import { setUser } from '../auth.js'
 
 const router = useRouter()
@@ -30,29 +31,18 @@ async function register() {
   saving.value = true
 
   try {
-    const response = await fetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: trimmedName,
-        username: trimmedUsername,
-        password: password.value,
-      }),
+    const user = await createUser({
+      name: trimmedName,
+      username: trimmedUsername,
+      password: password.value,
     })
-
-    if (response.status === 409) {
-      error.value = 'This username is already taken.'
-      saving.value = false
-      return
-    }
-
-    if (!response.ok) throw new Error('Could not create account')
-
-    const user = await response.json()
     setUser(user)
     router.push('/events')
-  } catch {
-    error.value = 'Could not reach the server. Start the app with npm start.'
+  } catch (err) {
+    error.value =
+      err.status === 409
+        ? 'This username is already taken.'
+        : 'Could not reach the database. Check your Firebase config in .env.local.'
     saving.value = false
   }
 }

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import * as api from '../api.js'
 import { currentUser } from '../auth.js'
 import {
   categories,
@@ -30,7 +31,7 @@ const unlocking = ref(false)
 let requestId = 0
 
 function isOwner() {
-  return Number(event.value?.createdBy) === Number(currentUser.value?.id)
+  return Boolean(currentUser.value) && event.value?.createdBy === currentUser.value.id
 }
 
 async function loadEvent() {
@@ -41,25 +42,14 @@ async function loadEvent() {
   unlockPassword.value = ''
 
   try {
-    const userId = currentUser.value?.id ?? ''
-    const response = await fetch(
-      `/api/events/${route.params.id}?userId=${encodeURIComponent(userId)}`,
-    )
-    if (myRequest !== requestId) return
-
-    if (!response.ok) {
-      event.value = null
-      error.value = 'This event was not found.'
-      return
-    }
-
+    const loaded = await api.getEvent(route.params.id, currentUser.value?.id ?? '')
     await loadUsers()
     if (myRequest !== requestId) return
-    event.value = await response.json()
-  } catch {
+    event.value = loaded
+  } catch (err) {
     if (myRequest !== requestId) return
     event.value = null
-    error.value = 'Could not load this event.'
+    error.value = err.status === 404 ? 'This event was not found.' : 'Could not load this event.'
   }
 }
 
@@ -83,29 +73,16 @@ async function updateParticipation(participating) {
     : event.value.participants.filter((id) => id !== currentUser.value.id)
 
   try {
-    const response = await fetch(`/api/events/${event.value.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        participants,
-        userId: currentUser.value.id,
-        password: unlockPassword.value,
-      }),
+    event.value = await api.updateEvent(event.value.id, {
+      participants,
+      userId: currentUser.value.id,
+      password: unlockPassword.value,
     })
-
-    if (response.status === 403) {
-      error.value = 'Wrong password.'
-      return
-    }
-
-    if (!response.ok) throw new Error('Could not update participation')
-
-    event.value = await response.json()
     await loadEvents()
-  } catch {
-    error.value = participating
-      ? 'Could not join this event.'
-      : 'Could not leave this event.'
+  } catch (err) {
+    if (err.status === 403) error.value = 'Wrong password.'
+    else if (participating) error.value = 'Could not join this event.'
+    else error.value = 'Could not leave this event.'
   } finally {
     joining.value = false
   }
@@ -132,25 +109,12 @@ async function unlockEvent() {
   unlocking.value = true
 
   try {
-    const response = await fetch(`/api/events/${event.value.id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: unlockPassword.value,
-        userId: currentUser.value.id,
-      }),
+    event.value = await api.unlockEvent(event.value.id, {
+      password: unlockPassword.value,
+      userId: currentUser.value.id,
     })
-
-    if (response.status === 403) {
-      error.value = 'Wrong password.'
-      return
-    }
-
-    if (!response.ok) throw new Error('Could not open event')
-
-    event.value = await response.json()
-  } catch {
-    error.value = 'Could not open this event.'
+  } catch (err) {
+    error.value = err.status === 403 ? 'Wrong password.' : 'Could not open this event.'
   } finally {
     unlocking.value = false
   }
@@ -194,31 +158,19 @@ async function saveEdit() {
   saving.value = true
 
   try {
-    const response = await fetch(`/api/events/${event.value.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: currentUser.value.id,
-        title: title.value.trim(),
-        date: date.value,
-        place: place.value.trim(),
-        description: description.value.trim(),
-        categoryId: Number(categoryId.value),
-      }),
+    event.value = await api.updateEvent(event.value.id, {
+      userId: currentUser.value.id,
+      title: title.value.trim(),
+      date: date.value,
+      place: place.value.trim(),
+      description: description.value.trim(),
+      categoryId: categoryId.value,
     })
-
-    if (response.status === 403) {
-      error.value = 'Only the owner can edit this event.'
-      return
-    }
-
-    if (!response.ok) throw new Error('Could not save event')
-
-    event.value = await response.json()
     editing.value = false
     await loadEvents()
-  } catch {
-    error.value = 'Could not save the event.'
+  } catch (err) {
+    error.value =
+      err.status === 403 ? 'Only the owner can edit this event.' : 'Could not save the event.'
   } finally {
     saving.value = false
   }
@@ -231,24 +183,16 @@ async function deleteEvent() {
   error.value = ''
 
   try {
-    const response = await fetch(`/api/events/${event.value.id}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: currentUser.value.id }),
-    })
-
-    if (response.status === 403) {
-      error.value = 'Only the owner can delete this event.'
-      confirmingDelete.value = false
-      return
-    }
-
-    if (!response.ok) throw new Error('Could not delete event')
-
+    await api.deleteEvent(event.value.id, currentUser.value.id)
     await loadEvents()
     router.push('/events')
-  } catch {
-    error.value = 'Could not delete this event.'
+  } catch (err) {
+    if (err.status === 403) {
+      error.value = 'Only the owner can delete this event.'
+      confirmingDelete.value = false
+    } else {
+      error.value = 'Could not delete this event.'
+    }
   } finally {
     deleting.value = false
   }

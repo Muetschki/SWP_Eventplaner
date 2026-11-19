@@ -15,7 +15,7 @@ async function refresh() {
     await loadEvents()
     loadError.value = ''
   } catch {
-    loadError.value = 'Could not load events. Start the app with npm start.'
+    loadError.value = 'Could not load events. Check your Firebase config in .env.local.'
   }
 }
 

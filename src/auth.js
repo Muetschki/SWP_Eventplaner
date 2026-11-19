@@ -2,7 +2,8 @@ import { ref } from 'vue'
 
 function readSavedUser() {
   try {
-    return JSON.parse(localStorage.getItem('user') || 'null')
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    return user ? { ...user, id: String(user.id) } : null
   } catch {
     return null
   }
@@ -11,7 +12,7 @@ function readSavedUser() {
 export const currentUser = ref(readSavedUser())
 
 export function setUser(user) {
-  const safeUser = { id: user.id, username: user.username, name: user.name }
+  const safeUser = { id: String(user.id), username: user.username, name: user.name }
   currentUser.value = safeUser
   localStorage.setItem('user', JSON.stringify(safeUser))
 }

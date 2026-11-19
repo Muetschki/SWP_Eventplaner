@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getCategories, getUsers, listEvents } from './api.js'
 import { currentUser } from './auth.js'
 
 export const events = ref([])
@@ -7,26 +8,19 @@ export const categories = ref([])
 export const filters = ref({ q: '', categoryId: '' })
 
 export async function loadEvents() {
-  const params = new URLSearchParams({
+  events.value = await listEvents({
     userId: currentUser.value?.id ?? '',
-    q: filters.value.q.trim(),
+    q: filters.value.q,
     categoryId: filters.value.categoryId,
   })
-  const response = await fetch(`/api/events?${params}`)
-  if (!response.ok) throw new Error('Could not load events')
-  events.value = await response.json()
 }
 
 export async function loadCategories() {
-  const response = await fetch('/api/categories')
-  if (!response.ok) throw new Error('Could not load categories')
-  categories.value = await response.json()
+  categories.value = await getCategories()
 }
 
 export async function loadUsers() {
-  const response = await fetch('/api/users')
-  if (!response.ok) throw new Error('Could not load users')
-  users.value = await response.json()
+  users.value = await getUsers()
 }
 
 export function nameFor(userId) {
